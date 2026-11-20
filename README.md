@@ -20,7 +20,7 @@ flowchart LR
 
 ### Key System Capabilities
 * **Accuracy-Preserving Quantization (`INT8 P1.5` + 3-Digit Outlier Fallback):** Combines offline **SmoothQuant** migration, symmetric **Per-Channel INT8** weight quantization, static activation quantization (`margin = 1.5`), and a dynamic **base-128 3-digit INT8 decomposition** for massive activation outliers (`1.356%` of rows), preserving FP32 semantic accuracy without retraining.
-* **Multi-Threaded C++ Runtime & Zero-Copy CMA (`llm_runtime.cpp`):** Executes the full multimodal pipeline in standalone C++ on ARM64 Linux; statically pins all 24 LLM layers and `lm_head` weights in physically contiguous **CMA memory (`/dev/dma_heap/reserved`)** with user-space ARMv8 hardware cache maintenance (`dc cvac` / `dc civac`).
+* **Multi-Threaded C++ Runtime & Zero-Copy CMA:** Executes the full multimodal pipeline in standalone C++ on ARM64 Linux; statically pins all 24 LLM layers and `lm_head` weights in physically contiguous **CMA memory (`/dev/dma_heap/reserved`)** with user-space ARMv8 hardware cache maintenance (`dc cvac` / `dc civac`).
 * **NEON-Vectorized Non-Linear PS Kernels:** Parallelizes `Log-Mel Spectrogram`, `LayerNorm`, `RMSNorm`, `RoPE`, `GELU LUT`, `SiLU`, `Attention Softmax`, and `KV-Cache Quantization` across all 4 Cortex-A53 cores using ARMv8 NEON SIMD with pre-allocated static buffers (**zero heap allocation** during token generation).
 * **200 MHz PL Systolic Array Acceleration:** Offloads all 41 dense matrix multiplications across the Audio Encoder, Projector, and Qwen2 LLM to the $16 \times 16$ Output-Stationary INT8 GEMM core in PL (peak **102.4 GOPS**) within a **3.652 W** total chip power envelope.
 
@@ -84,45 +84,20 @@ End-to-end numerical and semantic comparison between hardware-generated response
 
 ```text
 qwen2-audio-fpga-accelerator/
-├── README.md                                  # System overview, final results, structure & dataset licenses
-├── kr260_runtime/                             # C++ Inference Engine & on-board orchestration tools for Kria KR260
-│   ├── README.md                              # Layer-level GEMM verification guide & quantization conventions
-│   ├── src/
-│   │   ├── llm_runtime.cpp                    # Multi-threaded C++ inference engine (Mode 1: PS NEON | Mode 2: PS+PL)
-│   │   └── npu_run_case.c                     # Bit-true verification runner for individual model GEMM layers
-│   ├── microbenchmarks/
-│   │   ├── ps_bench.c                         # CPU NEON kernel profiler for single-token Qwen2-0.5B decode
-│   │   ├── npu_mbench.c                       # Hardware latency profiler across batch/sequence sizes M (1..16)
-│   │   └── overlap_bench.c                    # Weight-loading and PL-compute double-buffering benchmark
-│   └── scripts/
-│       ├── benchmark_ps_vs_pl.py              # Automated 20-WAV benchmark comparing Mode 1 (PS) vs. Mode 2 (PS+PL)
-│       ├── run_all_functions.py               # Automated bit-true verifier across all 41 model GEMM shapes
-│       ├── bench_cpu_fp32.py                  # Baseline CPU FP32 matrix multiplication benchmark
-│       ├── qffn_common.py                     # Bit-accurate Python reference model for FFN & GELU LUT
-│       ├── kr260_check.sh                     # System diagnostics, bitstream loader & test runner script
-│       ├── run.sh                             # Linux FPGA Manager bitstream loader
-│       └── run_wav_set.sh                     # Batch audio evaluation script
-├── model_and_dataset/                         # Audio evaluation dataset & PyTorch baseline script
-│   ├── LLM_Question/                          # 20 test audio files in 16kHz mono PCM (01.wav -> 20_alpacaaudio.wav)
-│   └── test_dialogue_inthewild.py             # PyTorch FP32/BF16 baseline inference script for the 20 WAV queries
-├── quantization_notebooks/                    # INT8 P1.5 quantization, pkg_v1 export & quality verification notebooks
-│   ├── export_and_sim/
-│   │   ├── qwen2audio_int8_export_colab.ipynb # Exports quantized weights and scales into the pkg_v1 binary package
-│   │   ├── ref_run_pkg.ipynb                  # Bit-accurate simulation notebook for pkg_v1
-│   │   ├── ref_runtime.py                     # Python reference runtime implementation
-│   │   └── make_cpp_inputs.py                 # Input generator for the C++ runtime
-│   └── quality_evaluation/
-│       ├── qwen2audio_int8_quality_150wav_colab.ipynb  # INT8 P1.5 calibration & 150-question OOD Audio Quiz evaluation
-│       ├── qwen2-audio-int8_quality_50wav_kaggle.ipynb # Quantization quality evaluation across 50 audio clips
-│       ├── kr260_int8_vs_fp32_20wavs_colab.ipynb       # End-to-end comparison: KR260 INT8 vs. PyTorch FP32/BF16 (20 WAVs)
-│       └── more-wav-forqwen2.ipynb                     # Extraction & 16kHz normalization of the 6 OOD audio files (15..20)
-└── results_and_evaluation/                    # Final evaluation reports, publication figures & on-board screenshots
-    ├── evaluation_reports/
-    │   ├── BENCHMARK_20WAVS_EVALUATION.md     # Detailed evaluation of Mode 1 (100% PS) vs. Mode 2 (PS + PL)
-    │   ├── FP32_VS_KR260_INT8_EVALUATION.md   # Detailed evaluation of PyTorch FP32/BF16 vs. KR260 INT8
-    │   ├── generate_evaluation_figures.py     # Script generating 300 DPI PNG & Vector PDF evaluation plots
-    │   └── figures/                           # 5 publication-ready figures (fig1..fig5 in .png & .pdf)
-    └── board_screenshots/                     # 7 terminal screenshots captured during live execution on Kria KR260
+├── LICENSE
+├── README.md
+├── kr260_runtime/
+│   ├── src/                       # Multi-threaded C++ inference engine & layer-level GEMM runner
+│   ├── microbenchmarks/           # On-board PS NEON, M-scaling & double-buffering benchmarks
+│   └── scripts/                   # Automated PS vs. PL benchmark & system check scripts
+├── model_and_dataset/
+│   └── LLM_Question/              # 20 evaluation audio queries (16 kHz mono PCM) & baseline script
+├── quantization_notebooks/
+│   ├── export_and_sim/            # INT8 P1.5 weight export (pkg_v1) & bit-accurate Python simulator
+│   └── quality_evaluation/        # 50-clip calibration, 150-quiz OOD & KR260 vs. FP32 notebooks
+└── results_and_evaluation/
+    ├── evaluation_reports/        # Detailed evaluation reports & publication figures (figures/)
+    └── board_screenshots/         # Live terminal screenshots captured on Kria KR260
 ```
 
 ---
@@ -132,8 +107,8 @@ qwen2-audio-fpga-accelerator/
 ### 1. Hardware IP, Model Baseline & Analysis Links
 | Component | Resource / Link | Description |
 | :--- | :--- | :--- |
-| **PL Hardware IP & Low-Level Drivers** | [`int8-matmul-accelerator`](https://github.com/VuDaiDuong-325/int8-matmul-accelerator) | Verilog RTL source (`16x16` Systolic Array, L2 Tiling AGU, Requant), Vivado Block Design, Testbenches, NPU drivers (`kr260_npu_driver.h`, `npu_driver.h`), and hardware probes (`gemm_test.c`, `ddr_bench.c`, `dmaheap_probe.c`, `cma_probe.c`, `regver.c`). |
-| **Target Model Baseline (GitHub)** | [`tranquangchung/Audio_Speech_Conversation`](https://github.com/tranquangchung/Audio_Speech_Conversation) | Upstream Qwen2-Audio architecture (`models/`), original 14 `.wav` files (`01.wav`–`14.wav`), and `test_dialogue_inthewild.py`. |
+| **PL Hardware IP & Low-Level Drivers** | [`int8-matmul-accelerator`](https://github.com/VuDaiDuong-325/int8-matmul-accelerator) | Verilog RTL core (`16x16` Systolic Array, L2 Tiling AGU, Per-Channel Requant), SystemVerilog verification suite, Vivado Block Design, and Linux NPU drivers. |
+| **Target Model Baseline (GitHub)** | [`tranquangchung/Audio_Speech_Conversation`](https://github.com/tranquangchung/Audio_Speech_Conversation) | Upstream Qwen2-Audio Dialogue architecture, baseline inference scripts, and the 14 original audio test queries (`01.wav`–`14.wav`). |
 | **Model Checkpoint (Hugging Face)** | [`tranquangchung/qwen2-audio-dialogue`](https://huggingface.co/tranquangchung/qwen2-audio-dialogue) | Fine-tuned Qwen2-Audio Dialogue checkpoint (32-layer Whisper-large Audio Tower + Projector + 24-layer Qwen2-0.5B, `~5.1 GB` FP32). |
 | **Quantization & Verification Analysis (Kaggle)** | [`duynguynngphng/qwen2-analysis`](https://www.kaggle.com/code/duynguynngphng/qwen2-analysis) | Detailed analysis of INT8 quantization error, activation/weight distributions, and accuracy verification on Qwen2-Audio. |
 
